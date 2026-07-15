@@ -21,6 +21,7 @@
 <h1>Download opere d'arte (Wikimedia)</h1>
 <div id="progress">Pronto: 58 opere in coda.</div>
 <button id="startBtn">Scarica tutto (ZIP)</button>
+<button id="copyFailBtn" style="background:#7c3aed;">Copia lista non scaricati</button>
 <div id="log"></div>
 
 <script>
@@ -184,10 +185,13 @@ async function fetchAsBlob(url) {
   return await res.blob();
 }
 
+let failedList = [];
+
 btn.addEventListener('click', async () => {
   btn.disabled = true;
   const zip = new JSZip();
   let done = 0, failed = 0;
+  failedList = [];
 
   for (const [date, author, title, url] of DATA) {
     const label = `${date} - ${author} - ${title}`;
@@ -206,6 +210,7 @@ btn.addEventListener('click', async () => {
     } catch (e) {
       log(`FAIL ${label} :: ${e.message} :: ${url}`, 'err');
       failed++;
+      failedList.push(`${label} :: ${url}`);
     }
   }
 
@@ -232,6 +237,24 @@ btn.addEventListener('click', async () => {
 
   btn.disabled = false;
   btn.textContent = 'Rilancia (solo falliti manualmente da rivedere)';
+});
+
+document.getElementById('copyFailBtn').addEventListener('click', async () => {
+  if (failedList.length === 0) {
+    log('Nessun elemento fallito da copiare (o download non ancora eseguito).', 'pending');
+    return;
+  }
+  const text = failedList.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    log(`Copiati ${failedList.length} elementi falliti negli appunti.`, 'ok');
+  } catch (e) {
+    log('Copia automatica non riuscita, testo mostrato sotto (selezionalo manualmente):', 'err');
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'white-space:pre-wrap;background:#222;padding:8px;border-radius:6px;user-select:all;';
+    pre.textContent = text;
+    logEl.appendChild(pre);
+  }
 });
 </script>
 </body>
