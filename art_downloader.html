@@ -28,11 +28,11 @@
 const DATA = [
 ["1424-1428","Masaccio","Il pagamento del tributo","https://commons.wikimedia.org/wiki/File:The_Tribute_Money_Masaccio_Cappella_Brancacci.jpg"],
 ["1434","Jan van Eyck","I coniugi Arnolfini","https://commons.wikimedia.org/wiki/Category:The_Arnolfini_Portrait_by_Jan_van_Eyck"],
-["1465","Antonello da Messina","Annunciata di Palermo","https://it.wikipedia.org/wiki/Annunciata_di_Palermo"],
+["1465","Antonello da Messina","Annunciata di Palermo","https://commons.wikimedia.org/wiki/File:Antonello_da_Messina_-_Virgin_Annunciate_-_Galleria_Regionale_della_Sicilia,_Palermo.jpg"],
 ["1477-1482","Sandro Botticelli","La Primavera","https://en.wikipedia.org/wiki/Primavera_(Botticelli)"],
 ["1483-1486","Leonardo da Vinci","Vergine delle Rocce","https://commons.wikimedia.org/wiki/File:Leonardo_Da_Vinci_-_Vergine_delle_Rocce_(Louvre).jpg"],
 ["1489-1490","Leonardo da Vinci","Dama con l'ermellino","https://en.wikipedia.org/wiki/Lady_with_an_Ermine"],
-["1490","Domenico Ghirlandaio","Ritratto di vecchio con nipote","https://en.wikipedia.org/wiki/An_Old_Man_and_His_Grandson"],
+["1490","Domenico Ghirlandaio","Ritratto di vecchio con nipote","https://commons.wikimedia.org/wiki/File:Ghirlandaio,_Domenico_-_An_Old_Man_and_His_Grandson_-_Louvre_-_Google_Art_Project.jpg"],
 ["1503-1506","Leonardo da Vinci","Monna Lisa","https://en.wikipedia.org/wiki/Mona_Lisa"],
 ["1506-1511","Giorgione","I tre filosofi","https://en.wikipedia.org/wiki/The_Three_Philosophers"],
 ["1508","Albrecht Dürer","Mani in preghiera","https://en.wikipedia.org/wiki/Praying_Hands"],
@@ -138,6 +138,24 @@ async function getFirstFileInCategory(categoryTitle) {
   return members[0].title.replace(/^File:/, '');
 }
 
+async function getWikidataImage(lang, title) {
+  // Passo 1: trova l'item Wikidata collegato alla pagina Wikipedia
+  const api1 = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageprops&format=json&origin=*`;
+  const res1 = await fetch(api1);
+  const data1 = await res1.json();
+  const page1 = Object.values(data1.query.pages)[0];
+  const qid = page1 && page1.pageprops && page1.pageprops.wikibase_item;
+  if (!qid) return null;
+  // Passo 2: leggi la proprietà P18 (immagine) dall'item Wikidata
+  const api2 = `https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${qid}&property=P18&format=json&origin=*`;
+  const res2 = await fetch(api2);
+  const data2 = await res2.json();
+  const claims = data2.claims && data2.claims.P18;
+  if (!claims || !claims.length) return null;
+  const filename = claims[0].mainsnak.datavalue.value;
+  return filename;
+}
+
 async function getPageImageFromWikipedia(lang, title) {
   // Metodo 1: pageimages (immagine principale/infobox)
   const api1 = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&piprop=original&format=json&origin=*`;
@@ -147,7 +165,10 @@ async function getPageImageFromWikipedia(lang, title) {
   if (page1 && page1.original && page1.original.source) {
     return decodeURIComponent(page1.original.source.split('/').pop());
   }
-  // Metodo 2 (fallback): prima immagine elencata nella pagina, escludendo icone/loghi generici
+  // Metodo 2: Wikidata P18 (più affidabile, indipendente dal layout della pagina)
+  const wdImage = await getWikidataImage(lang, title);
+  if (wdImage) return wdImage;
+  // Metodo 3 (ultimo fallback): prima immagine elencata nella pagina, escludendo icone/loghi generici
   const api2 = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=images&imlimit=20&format=json&origin=*`;
   const res2 = await fetch(api2);
   const data2 = await res2.json();
