@@ -139,18 +139,31 @@ async function getFirstFileInCategory(categoryTitle) {
 }
 
 async function getPageImageFromWikipedia(lang, title) {
-  // Try to get the main infobox image via pageimages, fallback to original image list
-  const api = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&piprop=original&format=json&origin=*`;
-  const res = await fetch(api);
-  const data = await res.json();
-  const pages = data.query.pages;
-  const page = Object.values(pages)[0];
-  if (page && page.original && page.original.source) {
-    // original.source points to upload.wikimedia.org file, extract filename
-    const src = page.original.source;
-    const fname = decodeURIComponent(src.split('/').pop());
-    return fname;
+  // Metodo 1: pageimages (immagine principale/infobox)
+  const api1 = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&piprop=original&format=json&origin=*`;
+  const res1 = await fetch(api1);
+  const data1 = await res1.json();
+  const page1 = Object.values(data1.query.pages)[0];
+  if (page1 && page1.original && page1.original.source) {
+    return decodeURIComponent(page1.original.source.split('/').pop());
   }
+  // Metodo 2 (fallback): prima immagine elencata nella pagina, escludendo icone/loghi generici
+  const api2 = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=images&imlimit=20&format=json&origin=*`;
+  const res2 = await fetch(api2);
+  const data2 = await res2.json();
+  const page2 = Object.values(data2.query.pages)[0];
+  if (page2 && page2.images) {
+    const skip = /(icon|logo|commons-logo|wikidata|edit-icon|question_book|padlock|ambox|folder|wiki_letter)/i;
+    const candidate = page2.images.find(im => !skip.test(im.title));
+    if (candidate) return candidate.title.replace(/^File:/, '');
+  }
+  return null;
+}
+
+async function getImageInfoAnySite(fileTitle) {
+  // Prova prima su Commons, poi come file locale della wiki di origine
+  let info = await getImageInfoByFileTitle(fileTitle);
+  if (info) return info;
   return null;
 }
 
@@ -186,16 +199,18 @@ async function fetchAsBlob(url) {
 }
 
 let failedList = [];
+let failedData = [];
 
-btn.addEventListener('click', async () => {
+async function runDownload(items) {
   btn.disabled = true;
   const zip = new JSZip();
   let done = 0, failed = 0;
   failedList = [];
+  failedData = [];
 
-  for (const [date, author, title, url] of DATA) {
+  for (const [date, author, title, url] of items) {
     const label = `${date} - ${author} - ${title}`;
-    progEl.textContent = `Elaboro ${done + failed + 1}/${DATA.length}: ${label}`;
+    progEl.textContent = `Elaboro ${done + failed + 1}/${items.length}: ${label}`;
     try {
       const info = await resolveImageInfo(url);
       if (!info || !info.url) {
@@ -211,10 +226,11 @@ btn.addEventListener('click', async () => {
       log(`FAIL ${label} :: ${e.message} :: ${url}`, 'err');
       failed++;
       failedList.push(`${label} :: ${url}`);
+      failedData.push([date, author, title, url]);
     }
   }
 
-  progEl.textContent = `Completato: ${done} scaricate, ${failed} fallite su ${DATA.length}.`;
+  progEl.textContent = `Completato: ${done} scaricate, ${failed} fallite su ${items.length}.`;
 
   if (done > 0) {
     log('Genero ZIP...', 'pending');
@@ -236,7 +252,16 @@ btn.addEventListener('click', async () => {
   }
 
   btn.disabled = false;
-  btn.textContent = 'Rilancia (solo falliti manualmente da rivedere)';
+  if (failedData.length > 0) {
+    btn.textContent = `Riprova solo i ${failedData.length} falliti`;
+  } else {
+    btn.textContent = 'Tutto scaricato';
+  }
+}
+
+btn.addEventListener('click', () => {
+  const items = failedData.length > 0 ? failedData : DATA;
+  runDownload(items);
 });
 
 document.getElementById('copyFailBtn').addEventListener('click', async () => {
