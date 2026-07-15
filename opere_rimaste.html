@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Opere rimaste</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background:#111; color:#eee; }
+  h1 { font-size: 1.2rem; }
+  button { width:100%; padding:14px; font-size:1rem; background:#2563eb; color:#fff; border:none; border-radius:8px; margin:8px 0; }
+  button:disabled { background:#555; }
+  #log { font-family: monospace; font-size:0.75rem; white-space:pre-wrap; background:#000; padding:8px; border-radius:6px; max-height:50vh; overflow-y:auto; }
+  .ok { color:#4ade80; }
+  .err { color:#f87171; }
+  .pending { color:#facc15; }
+  #progress { font-size:0.9rem; margin:8px 0; }
+  .note { font-size:0.75rem; color:#aaa; margin-top:16px; }
+</style>
+</head>
+<body>
+<h1>Opere rimaste (13 di pubblico dominio)</h1>
+<div id="progress">Pronto: 13 opere in coda.</div>
+<button id="startBtn">Scarica tutto (ZIP)</button>
+<div id="log"></div>
+<div class="note">
+Le 8 opere ancora protette da copyright (Picasso, de Chirico, Kahlo, Tamara de Lempicka, Magritte, Lichtenstein, Banksy, Kehinde Wiley) non sono incluse: non esiste per queste un file libero ad alta risoluzione su Wikimedia Commons.
+</div>
+
+<script>
+const DATA = [
+["1521","Rosso Fiorentino","Deposizione dalla Croce","https://commons.wikimedia.org/wiki/File:Rosso_Fiorentino_-_Deposition_from_the_Cross_-_WGA20130.jpg"],
+["1524","Parmigianino","Autoritratto entro uno specchio convesso","https://commons.wikimedia.org/wiki/File:Parmigianino_-_Self-portrait_in_a_Convex_Mirror_-_WGA17031.jpg"],
+["1545-1550","Agnolo Bronzino","Ritratto di Lucrezia Panciatichi","https://commons.wikimedia.org/wiki/File:Angelo_Bronzino_-_Portrait_of_Lucrezia_Panciatichi_-_WGA3266.jpg"],
+["1580-1600","El Greco","Il cavaliere con la mano sul petto","https://commons.wikimedia.org/wiki/File:El_Greco_-_Nobleman_with_his_Hand_on_his_Chest_-_WGA10463.jpg"],
+["1594","Caravaggio","I bari","https://commons.wikimedia.org/wiki/File:Caravaggio_-_I_bari.jpg"],
+["1599-1600","Caravaggio","Vocazione di san Matteo","https://commons.wikimedia.org/wiki/File:CaravaggioContarelli.jpg"],
+["1601","Caravaggio","Cena in Emmaus","https://commons.wikimedia.org/wiki/File:Caravaggio_-_Cena_in_Emmaus.jpg"],
+["1612-1613","Artemisia Gentileschi","Giuditta che decapita Oloferne","https://commons.wikimedia.org/wiki/File:Gentileschi_Artemisia_Judith_Beheading_Holofernes_Naples.jpg"],
+["1665-1669","Rembrandt","La sposa ebrea","https://commons.wikimedia.org/wiki/File:Rembrandt_-_The_Jewish_Bride_-_WGA19158.jpg"],
+["1786","Élisabeth Vigée Le Brun","Autoritratto con la figlia Julie","https://commons.wikimedia.org/wiki/File:Self-portrait_with_Her_Daughter_by_Elisabeth-Louise_Vig%C3%A9e_Le_BrunFXD.jpg"],
+["1800-1801","Francisco Goya","La famiglia di Carlo IV","https://commons.wikimedia.org/wiki/File:La_familia_de_Carlos_IV,_Francisco_de_Goya.jpg"],
+["1832","Jean-Auguste-Dominique Ingres","Ritratto di Monsieur Bertin","https://commons.wikimedia.org/wiki/File:Louis-Francois_Bertin.jpg"],
+["1890-1892","Paul Cézanne","I giocatori di carte","https://commons.wikimedia.org/wiki/File:Les_Joueurs_de_cartes,_par_Paul_C%C3%A9zanne,_Metropolitan_Museum_of_Art.jpg"]
+];
+
+const logEl = document.getElementById('log');
+const progEl = document.getElementById('progress');
+const btn = document.getElementById('startBtn');
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function sanitize(name) {
+  return name.replace(/[\\/:*?"<>|]/g, '_').trim();
+}
+
+function extractFileTitleFromCommonsUrl(url) {
+  const m = url.match(/commons\.wikimedia\.org\/wiki\/File:(.+)$/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+async function getImageInfoByFileTitle(fileTitle) {
+  const api = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent('File:'+fileTitle)}&prop=imageinfo&iiprop=url|size|mime&format=json&origin=*`;
+  const res = await fetch(api);
+  const data = await res.json();
+  const page = Object.values(data.query.pages)[0];
+  if (!page || page.missing || !page.imageinfo) return null;
+  return page.imageinfo[0];
+}
+
+async function fetchAsBlob(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return await res.blob();
+}
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  const zip = new JSZip();
+  let done = 0, failed = 0;
+
+  for (const [date, author, title, url] of DATA) {
+    const label = `${date} - ${author} - ${title}`;
+    progEl.textContent = `Elaboro ${done + failed + 1}/${DATA.length}: ${label}`;
+    try {
+      const fileTitle = extractFileTitleFromCommonsUrl(url);
+      const info = await getImageInfoByFileTitle(fileTitle);
+      if (!info || !info.url) throw new Error('immagine non risolta da API');
+      const ext = info.url.split('.').pop().split('?')[0].toLowerCase();
+      const blob = await fetchAsBlob(info.url);
+      const filename = sanitize(`${label}.${ext}`);
+      zip.file(filename, blob);
+      log(`OK  ${label} (${(blob.size/1024).toFixed(0)} KB)`, 'ok');
+      done++;
+    } catch (e) {
+      log(`FAIL ${label} :: ${e.message}`, 'err');
+      failed++;
+    }
+  }
+
+  progEl.textContent = `Completato: ${done} scaricate, ${failed} fallite su ${DATA.length}.`;
+
+  if (done > 0) {
+    log('Genero ZIP...', 'pending');
+    const content = await zip.generateAsync({type:'blob'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    a.download = 'opere_rimaste.zip';
+    document.body.appendChild(a);
+    a.click();
+    log('ZIP pronto: tocca il link se il download non parte automaticamente.', 'ok');
+    const manualLink = document.createElement('a');
+    manualLink.href = a.href;
+    manualLink.download = 'opere_rimaste.zip';
+    manualLink.textContent = 'Tocca qui per scaricare opere_rimaste.zip';
+    manualLink.style.display = 'block';
+    manualLink.style.color = '#4ade80';
+    manualLink.style.margin = '12px 0';
+    logEl.appendChild(manualLink);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Rilanciato';
+});
+</script>
+</body>
+</html>
